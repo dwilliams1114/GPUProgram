@@ -1,6 +1,7 @@
 package main;
 
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferByte;
 import java.awt.image.DataBufferInt;
 import java.io.BufferedReader;
 import java.io.FileInputStream;
@@ -18,21 +19,23 @@ import org.jocl.cl_mem;
 import org.jocl.cl_platform_id;
 import org.jocl.cl_program;
 
-// Created by Daniel Williams
-// Created on February 27, 2019
-// Last update on November 27, 2024
-
-// This class provides access to OpenCL based general purpose
-//   massively parallel processing using the GPU.
-
-// This uses the JOCL (not JogAmp) implementation of Java OpenCL bindings
+/**
+ * @author Daniel Williams
+ * 
+ * Created on February 27, 2019
+ * Last update on May 17, 2025
+ *
+ * This class provides access to OpenCL based general purpose parallel computing using the GPU.
+ * 
+ * This uses the JOCL (not JogAmp) implementation of Java OpenCL bindings.
+ */
 
 enum ArrayType {
-	BYTE, INT, FLOAT, LONG, DOUBLE, BUFFERED_IMAGE;
+	BYTE, INT, FLOAT, LONG, DOUBLE, BUFFERED_IMAGE_INT, BUFFERED_IMAGE_BYTE;
 	
 	public int getSize() {
 		if (this == BYTE) {
-			return Sizeof.cl_char;
+			return Sizeof.cl_uchar;
 		} else if (this == INT) {
 			return Sizeof.cl_int;
 		} else if (this == FLOAT) {
@@ -41,8 +44,10 @@ enum ArrayType {
 			return Sizeof.cl_long;
 		} else if (this == DOUBLE) {
 			return Sizeof.cl_double;
-		} else if (this == BUFFERED_IMAGE) {
+		} else if (this == BUFFERED_IMAGE_INT) {
 			return Sizeof.cl_int;
+		} else if (this == BUFFERED_IMAGE_BYTE) {
+			return Sizeof.cl_uchar;
 		}
 		new Exception("\nUnknown ArrayType: " + this).printStackTrace();
 		System.exit(1);
@@ -337,20 +342,39 @@ public class GPUProgram {
 				dataPointer = Pointer.to(array);
 				originalArrayLength = array.length;
 			} else if (arg instanceof BufferedImage) {
+				
 				BufferedImage image = (BufferedImage)arg;
-				if (image.getType() != BufferedImage.TYPE_INT_RGB &&
-						image.getType() != BufferedImage.TYPE_INT_BGR &&
-						image.getType() != BufferedImage.TYPE_INT_ARGB) {
-					error("BufferedImage must be of type INT_RGB, INT_BGR, or INT_ARGB");
+				
+				if (image.getType() == BufferedImage.TYPE_INT_RGB ||
+					image.getType() == BufferedImage.TYPE_INT_BGR ||
+					image.getType() == BufferedImage.TYPE_INT_ARGB_PRE ||
+					image.getType() == BufferedImage.TYPE_INT_ARGB) {
+					
+					final DataBufferInt dataBuffer = (DataBufferInt) ((BufferedImage)arg).getRaster().getDataBuffer();
+					final int[] array = dataBuffer.getData();
+					type = ArrayType.BUFFERED_IMAGE_INT;
+					typeSize = Sizeof.cl_int;
+					dataPointer = Pointer.to(array);
+					originalArrayLength = array.length;
+					
+				} else if (image.getType() == BufferedImage.TYPE_3BYTE_BGR ||
+						   image.getType() == BufferedImage.TYPE_4BYTE_ABGR ||
+						   image.getType() == BufferedImage.TYPE_4BYTE_ABGR_PRE ||
+						   image.getType() == BufferedImage.TYPE_BYTE_GRAY) {
+					
+					final DataBufferByte dataBuffer = (DataBufferByte) ((BufferedImage)arg).getRaster().getDataBuffer();
+					final byte[] array = dataBuffer.getData();
+					type = ArrayType.BUFFERED_IMAGE_BYTE;
+					typeSize = Sizeof.cl_uchar;
+					dataPointer = Pointer.to(array);
+					originalArrayLength = array.length;
+					
+				} else {
+					error("BufferedImage must be an INT or BYTE type.");
 				}
 				
-				final DataBufferInt dataBuffer = (DataBufferInt) ((BufferedImage)arg).getRaster().getDataBuffer();
-				final int[] array = dataBuffer.getData();
 				argTypeName = "BufferedImage";
-				type = ArrayType.BUFFERED_IMAGE;
-				typeSize = Sizeof.cl_int;
-				dataPointer = Pointer.to(array);
-				originalArrayLength = array.length;
+				
 			} else if (arg == null) {
 				error("Argument is null");
 			} else {
@@ -864,10 +888,12 @@ public class GPUProgram {
 		}
 
 		long typeSize = 1;
-		if (source.type == ArrayType.BUFFERED_IMAGE) {
+		if (source.type == ArrayType.BUFFERED_IMAGE_INT) {
 			typeSize = Sizeof.cl_int;
+		} else if (source.type == ArrayType.BUFFERED_IMAGE_BYTE) {
+			typeSize = Sizeof.cl_uchar;
 		} else if (source.type == ArrayType.BYTE) {
-			typeSize = Sizeof.cl_char;
+			typeSize = Sizeof.cl_uchar;
 		} else if (source.type == ArrayType.DOUBLE) {
 			typeSize = Sizeof.cl_double;
 		} else if (source.type == ArrayType.FLOAT) {
@@ -889,9 +915,8 @@ public class GPUProgram {
 	 * @return bytes
 	 */
 	public static long getGlobalMemory() {
-		if (device == null) {
-			error2("GPU not initialized");
-		}
+		GPUProgram.initializeGPU();
+		
 		long[] value = {0};
 		CL.clGetDeviceInfo(device, CL.CL_DEVICE_GLOBAL_MEM_SIZE,
 				Sizeof.cl_ulong, Pointer.to(value), new long[] {value.length});
@@ -902,9 +927,8 @@ public class GPUProgram {
 	 * @return bytes
 	 */
 	public static long getMaxMemAllocSize() {
-		if (device == null) {
-			error2("GPU not initialized");
-		}
+		GPUProgram.initializeGPU();
+		
 		long[] value = {0};
 		CL.clGetDeviceInfo(device, CL.CL_DEVICE_MAX_MEM_ALLOC_SIZE,
 				Sizeof.cl_ulong, Pointer.to(value), new long[] {value.length});
@@ -920,9 +944,7 @@ public class GPUProgram {
 	/** Display metrics for the GPU.
 	 */
 	public static void printDeviceStatistics() {
-		if (device == null) {
-			error2("GPU not initialized");
-		}
+		GPUProgram.initializeGPU();
 		
 		print("Device Name: " + getDeviceInfoString(device, CL.CL_DEVICE_VENDOR) + " " + getDeviceInfoString(device, CL.CL_DEVICE_NAME));
 		print("Parallel Compute Units: " + getDeviceInfoInt(device, CL.CL_DEVICE_MAX_COMPUTE_UNITS));

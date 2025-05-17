@@ -4,10 +4,12 @@ import java.util.Arrays;
 import main.GPUAccess;
 import main.GPUProgram;
 
-/*
+/**
  * This example adds any number of arrays together iteratively by accumulating the result in the final array.
  * We wait until the end to copy the result off the GPU.
  * In the intermediate iterations, we just re-use the memory that's already allocated on the GPU to accumulate the result.
+ *
+ * Programmed by Daniel Williams in 2025.
  */
 
 public class ReuseMemory {

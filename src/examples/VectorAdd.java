@@ -4,9 +4,11 @@ import java.util.Arrays;
 import main.GPUAccess;
 import main.GPUProgram;
 
-/*
+/**
  * This example adds to arrays, a + b = c, in parallel on the GPU.
  * This example requires "VectorAdd.cl".
+ * 
+ * Programmed by Daniel Williams in 2025
  */
 
 public class VectorAdd {

@@ -23,7 +23,7 @@ of common cases while allowing cleaner, more readable code.
 - And partially supports manipulating:
     - `double[]`
 	- `long[]`
-	- `BufferedImage` of type `TYPE_INT_RGB`, `TYPE_INT_BGR`, and `TYPE_INT_ARGB`
+	- `BufferedImage`
 - And the following primitives:
     - `float`
 	- `int`
@@ -32,7 +32,7 @@ of common cases while allowing cleaner, more readable code.
 
 # Example
 
-This example implements parallel vector addition: a + b = c.
+This example implements parallel vector addition: c[i] = a[i] + b[i]
 
 VectorAdd.java:
 ```java
