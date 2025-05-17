@@ -63,7 +63,7 @@ kernel void vectorAddKernel(global const float* a, global const float* b, global
 
 1. No lambda expressions
 1. 100% imperative code
-1. Java 8+ compatability
+1. Java 8+ compatibility
 1. Use tabs or else
 1. `abstract`, `interface`, `extends`, and `implements` are banned
 
