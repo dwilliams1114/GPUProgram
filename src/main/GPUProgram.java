@@ -552,14 +552,45 @@ public class GPUProgram {
 	 * This is a blocking call.
 	 */
 	public void copyFromGPU() {
+		
+		// Use this array to deduplicate copies.
+		int deduplicatorIndex = 0;
+		GPUMem[] referencesAlreadyCopied = null;
+		
 		for (int i = 0; i < maxArrayArgIndex + 1; i++) {
 			if (arrayGPUPointers[i] != null) {
-				long argTypeSize = arrayGPUPointers[i].type.getSize();
-				CL.clEnqueueReadBuffer(commandQueue, arrayGPUPointers[i].mem, true, 0,
-						argTypeSize * arrayGPUPointers[i].arrayRange.size,
-						arrayGPUPointers[i].pointer.withByteOffset(arrayGPUPointers[i].arrayRange.start * argTypeSize),
-						0, null, null);
-				copyToCPUCounter++;
+				// If we might have written to this array on the GPU, then copy it back to the CPU.
+				if (arrayGPUPointers[i].accessType == GPUAccess.WRITE ||
+					arrayGPUPointers[i].accessType == GPUAccess.READ_WRITE) {
+					
+					// Check that we didn't already copy this one previously
+					boolean alreadyCopied = false;
+					if (referencesAlreadyCopied != null) {
+						for (int j = 0; j < referencesAlreadyCopied.length; j++) {
+							if (referencesAlreadyCopied[j] == null || referencesAlreadyCopied[j] == arrayGPUPointers[i]) {
+								alreadyCopied = true;
+								break;
+							}
+						}
+					}
+					
+					// If we haven't already copied this GPUMem to the CPU, then copy it over now.
+					if (!alreadyCopied) {
+						long argTypeSize = arrayGPUPointers[i].type.getSize();
+						CL.clEnqueueReadBuffer(commandQueue, arrayGPUPointers[i].mem, true, 0,
+								argTypeSize * arrayGPUPointers[i].arrayRange.size,
+								arrayGPUPointers[i].pointer.withByteOffset(arrayGPUPointers[i].arrayRange.start * argTypeSize),
+								0, null, null);
+						copyToCPUCounter++;
+					}
+					
+					// Record this in the list of GPUMems that were already copied to the CPU.
+					if (referencesAlreadyCopied == null) {
+						referencesAlreadyCopied = new GPUMem[maxArrayArgIndex + 1];
+					}
+					referencesAlreadyCopied[deduplicatorIndex] = arrayGPUPointers[i];
+					deduplicatorIndex++;
+				}
 			}
 		}
 	}
@@ -608,7 +639,7 @@ public class GPUProgram {
 	}
 	
 	/** Reserve blank memory on the GPU, and return a GPUMem pointer to that memory.
-	 * @param arr The array to whose length is used as the allocation size.
+	 * @param arr The array associated with this GPUMem object, whose length is used for allocation size.
 	 * @param accessType GPUAccess.WRITE, GPUAccess.READ, or GPUAccess.READ_WRITE
 	 * @param fillWithZeros Whether to fill the newly allocated memory with zeros or not.
 	 * @return GPUMem pointer to the new memory allocated on the GPU.
@@ -646,12 +677,21 @@ public class GPUProgram {
 		allocCounter++;
 		
 		if (fillWithZeros) {
-			CL.clEnqueueFillBuffer(commandQueue, mem, Pointer.to(new byte[] {1}), 1, 0, numElements * typeSize, 0, null, null);
+			CL.clEnqueueFillBuffer(commandQueue, mem, Pointer.to(new byte[] {0}), 1, 0, numElements * typeSize, 0, null, null);
 			//CL.clFlush(commandQueue);
 			//CL.clFinish(commandQueue); // TODO are these necessary?
 		}
 		
 		return new GPUMem(mem, arrayPointer, type, new GPURange(0, numElements), accessType);
+	}
+	
+	/** Copy an array to the GPU and return a GPU pointer.
+	 * If existingMem is specified, then it will copy over that GPU memory.
+	 * @param existingMem Copy the array associated with this GPUMem to the existing allocated location on the GPU.
+	 * @return GPUMem pointer to the array on the GPU.
+	 */
+	public static GPUMem copyArrayToGPU(GPUMem existingMem) {
+		return copyArrayToGPU(null, existingMem, null, 0, null);
 	}
 	
 	/** Copy an array to the GPU and return a GPU pointer.
@@ -668,23 +708,21 @@ public class GPUProgram {
 	 * If existingMem is specified, then it will copy over that GPU memory.
 	 * @param arr The array to copy to the GPU.
 	 * @param existingMem (Optional) The existing memory to overwrite on the GPU.
-	 * @param accessType GPUAccess.WRITE, GPUAccess.READ, or GPUAccess.READ_WRITE
 	 * @return GPUMem pointer to the array on the GPU.
 	 */
-	public static GPUMem copyArrayToGPU(Object arr, GPUMem existingMem, GPUAccess accessType) {
-		return copyArrayToGPU(arr, existingMem, null, 0, accessType);
+	public static GPUMem copyArrayToGPU(Object arr, GPUMem existingMem) {
+		return copyArrayToGPU(arr, existingMem, null, 0, null);
 	}
 	
 	/** Copy an array to the GPU and return a GPU pointer.
 	 * If existingMem is specified, then it will copy over that GPU memory.
 	 * @param arr The array to copy to the GPU.
 	 * @param existingMem (Optional) The existing memory to overwrite on the GPU.
-	 * @param destOffset (Optional) The offset (in sizeof(type)) in the GPU memory to copy to.
-	 * @param accessType GPUAccess.WRITE, GPUAccess.READ, or GPUAccess.READ_WRITE
+	 * @param destOffset The offset (in sizeof(type)) in the GPU memory to copy to.
 	 * @return GPUMem pointer to the array on the GPU.
 	 */
-	public static GPUMem copyArrayToGPU(Object arr, GPUMem existingMem, int destOffset, GPUAccess accessType) {
-		return copyArrayToGPU(arr, existingMem, null, destOffset, accessType);
+	public static GPUMem copyArrayToGPU(Object arr, GPUMem existingMem, int destOffset) {
+		return copyArrayToGPU(arr, existingMem, null, destOffset, null);
 	}
 	
 	/** Copy an array to the GPU and return a GPU pointer.
@@ -692,7 +730,7 @@ public class GPUProgram {
 	 * @param arr The array to copy to the GPU.
 	 * @param existingMem (Optional) The existing memory to overwrite on the GPU.
 	 * @param sourceRange (Optional) The subset of the 'arr' to be copied to the GPU.
-	 * @param destOffset (Optional) The offset (in sizeof(type)) in the GPU memory to copy to.
+	 * @param destOffset The offset (in sizeof(type)) in the GPU memory to copy to.
 	 * @param accessType GPUAccess.WRITE, GPUAccess.READ, or GPUAccess.READ_WRITE
 	 * @return GPUMem pointer to the array on the GPU.
 	 */
@@ -706,32 +744,51 @@ public class GPUProgram {
 		if (destOffset < 0) {
 			error2("Destination offset cannot be negative.");
 		}
-		
+
 		ArrayType type = null;
 		String argTypeName = null;
 		long originalArrayLength = -1;
 		long typeSize = 0;
 		Pointer dataPointer = null;
-		if (arr instanceof float[]) {
-			type = ArrayType.FLOAT;
-			argTypeName = "float[]";
-			originalArrayLength = ((float[])arr).length;
-			typeSize = Sizeof.cl_float;
-			dataPointer = Pointer.to((float[])arr);
-		} else if (arr instanceof byte[]) {
-			type = ArrayType.BYTE;
-			argTypeName = "byte[]";
-			originalArrayLength = ((byte[])arr).length;
-			typeSize = Sizeof.cl_uchar;
-			dataPointer = Pointer.to((byte[])arr);
-		} else if (arr instanceof int[]) {
-			type = ArrayType.INT;
-			argTypeName = "int[]";
-			originalArrayLength = ((int[])arr).length;
-			typeSize = Sizeof.cl_int;
-			dataPointer = Pointer.to((int[])arr);
+		
+		// If we weren't given an array, then get it from the GPUMem
+		if (arr == null) {
+			if (existingMem != null) {
+				type = existingMem.type;
+				argTypeName = "<unknown>";
+				originalArrayLength = existingMem.arrayRange.size; // Just a guess
+				typeSize = existingMem.type.getSize();
+				dataPointer = existingMem.pointer;
+			} else {
+				error2("GPUMem and array arguments can't both be null");
+			}
 		} else {
-			error2("Invalid array type.");
+			if (arr instanceof float[]) {
+				type = ArrayType.FLOAT;
+				argTypeName = "float[]";
+				originalArrayLength = ((float[])arr).length;
+				typeSize = Sizeof.cl_float;
+				dataPointer = Pointer.to((float[])arr);
+			} else if (arr instanceof byte[]) {
+				type = ArrayType.BYTE;
+				argTypeName = "byte[]";
+				originalArrayLength = ((byte[])arr).length;
+				typeSize = Sizeof.cl_uchar;
+				dataPointer = Pointer.to((byte[])arr);
+			} else if (arr instanceof int[]) {
+				type = ArrayType.INT;
+				argTypeName = "int[]";
+				originalArrayLength = ((int[])arr).length;
+				typeSize = Sizeof.cl_int;
+				dataPointer = Pointer.to((int[])arr);
+			} else {
+				error2("Unsupported array type.");
+			}
+		}
+		
+		// If we don't have an access type, then get it from the GPUMem
+		if (existingMem != null && accessType == null) {
+			accessType = existingMem.accessType;
 		}
 		
 		// Invalid cases...
@@ -789,21 +846,20 @@ public class GPUProgram {
 	}
 	
 	/** Copy from the GPU to the CPU.
+	 * @param source A GPUMem pointer who's memory on the GPU will be copied back to the associated array on the CPU.
+	 */
+	public static void copyArrayToCPU(GPUMem source) {
+		copyArrayToCPU_helper(source, source.pointer, source.arrayRange.size, source.type.getSize());
+	}
+	
+	/** Copy from the GPU to the CPU.
 	 * @param source A GPUMem pointer to memory on the GPU to copy from.
 	 * @param destArray A Java array to copy the data into.
 	 */
 	public static void copyArrayToCPU(GPUMem source, Object destArray) {
 		
-		if (source == null) {
-			error2("Source GPUMem is null.");
-		}
-		
 		if (destArray == null) {
 			error2("Array to copy to must not be null.");
-		}
-		
-		if (source.arrayRange == null || source.accessType == null) {
-			error2("Attempted to access deallocated GPUMem object.");
 		}
 		
 		long numElements = -1;
@@ -822,7 +878,25 @@ public class GPUProgram {
 			typeSize = Sizeof.cl_int;
 			dataPointer = Pointer.to((int[])destArray);
 		} else {
-			error2("Invalid array type.");
+			error2("Unsupported array type.");
+		}
+		
+		copyArrayToCPU_helper(source, dataPointer, numElements, typeSize);
+	}
+	
+	// Local helper function for the above two
+	private static void copyArrayToCPU_helper(GPUMem source, Pointer dataPointer, final long numElements, final long typeSize) {
+		
+		if (source == null) {
+			error2("Source GPUMem is null.");
+		}
+		
+		if (dataPointer == null) {
+			error2("Pointer to CPU memory is null");
+		}
+		
+		if (source.arrayRange == null || source.accessType == null) {
+			error2("Attempted to access deallocated GPUMem object.");
 		}
 		
 		// Size checks

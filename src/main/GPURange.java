@@ -8,6 +8,11 @@ public class GPURange {
 	protected final long end;   // Excludes 'end'
 	protected final long size;
 	
+	/**
+	 * Construct a new GPURange.
+	 * @param start Start index in the range (inclusive).
+	 * @param end End index in the range (exclusive).
+	 */
 	public GPURange(long start, long end) {
 		this.start = start;
 		this.end = end;
