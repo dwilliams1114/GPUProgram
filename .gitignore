@@ -33,7 +33,6 @@ replay_pid*
 *.zip
 *.tar.gz
 *.rar
-*.jar
 *.war
 *.ear
 *.nar
