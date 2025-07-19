@@ -12,7 +12,7 @@ public class GPUMem {
 	protected cl_mem mem;			// Pointer to memory on the GPU.
 	protected GPURange arrayRange;	// Elements in the original array to copy into from the GPU. (May be smaller than maxAllocatedSize.)
 	protected GPUAccess accessType;		// Read, Write, Read-Write.
-	protected long maxAllocatedSize;	// Size of the cl_mem on the GPU.
+	protected long maxAllocatedSize;	// Size of the cl_mem on the GPU (in elements, not bytes)
 	protected Pointer pointer;		// Pointer to the Java array to read or write to.
 	
 	protected GPUMem(cl_mem mem, Pointer arrayPointer, ArrayType type, GPURange arrayRange, GPUAccess accessType) {

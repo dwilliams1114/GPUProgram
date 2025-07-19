@@ -161,6 +161,7 @@ public class GPUProgram {
 	 */
 	public GPUProgram(String kernelName, String filePath, String includePath) {
 		initializeGPU();
+		
 		try {
 			// Load the lines of code for the OpenCL kernel
 			final BufferedReader br = new BufferedReader(
@@ -287,10 +288,6 @@ public class GPUProgram {
 		
 		if (argNum < 0) {
 			error("Kernel argNum must be positive");
-		}
-		
-		if (!initialized) {
-			error("GPU not initialized");
 		}
 		
 		if (arg == null) {
@@ -638,6 +635,33 @@ public class GPUProgram {
 		}
 	}
 	
+	/** Set the given range of the given gpu-allocated memory to zero
+	 * @param mem GPUMem pointer to the memory to zero.
+	 * @param startIndex Starting index in the array of the stored type-size to start.
+	 * @param length Number of elements to zero, where each element may be multiple bytes.
+	 */
+	public static void zeroMemoryOnGPU(GPUMem mem, int startIndex, int length) {
+		
+		if (!initialized) {
+			initializeGPU();
+		}
+		
+		if (mem == null) {
+			error2("GPUMem is null!");
+		}
+		
+		if (startIndex + length > mem.maxAllocatedSize) {
+			error2("Range out bounds: [" + startIndex + ", " + (startIndex + length) + "] exceeds [0, " + mem.maxAllocatedSize + "]");
+		}
+		
+		int typeSize = mem.type.getSize();
+		
+		CL.clEnqueueFillBuffer(commandQueue, mem.mem, Pointer.to(new byte[] {0}), 1,
+					startIndex * typeSize, length * typeSize, 0, null, null);
+		//CL.clFlush(commandQueue);
+		//CL.clFinish(commandQueue); // TODO are these necessary?
+	}
+	
 	/** Reserve blank memory on the GPU, and return a GPUMem pointer to that memory.
 	 * @param arr The array associated with this GPUMem object, whose length is used for allocation size.
 	 * @param accessType GPUAccess.WRITE, GPUAccess.READ, or GPUAccess.READ_WRITE
@@ -645,6 +669,10 @@ public class GPUProgram {
 	 * @return GPUMem pointer to the new memory allocated on the GPU.
 	 */
 	public static GPUMem allocateMemoryOnGPU(Object arr, GPUAccess accessType, boolean fillWithZeros) {
+		
+		if (!initialized) {
+			initializeGPU();
+		}
 		
 		if (arr == null) {
 			error2("Argument is null");
@@ -735,6 +763,10 @@ public class GPUProgram {
 	 * @return GPUMem pointer to the array on the GPU.
 	 */
 	public static GPUMem copyArrayToGPU(Object arr, GPUMem existingMem, GPURange sourceRange, int destOffset, GPUAccess accessType) {
+		
+		if (!initialized) {
+			initializeGPU();
+		}
 		
 		if (accessType == GPUAccess.WRITE) {
 			error2("Cannot copy write-only memory to GPU!\n" +
@@ -858,6 +890,14 @@ public class GPUProgram {
 	 */
 	public static void copyArrayToCPU(GPUMem source, Object destArray) {
 		
+		if (!initialized) {
+			initializeGPU();
+		}
+		
+		if (source == null) {
+			error2("Source GPUMem is null!");
+		}
+		
 		if (destArray == null) {
 			error2("Array to copy to must not be null.");
 		}
@@ -933,6 +973,10 @@ public class GPUProgram {
 	 */
 	public static void copyGPUMem(GPUMem source, GPUMem dest, GPURange sourceRange, GPURange destRange) {
 		
+		if (!initialized) {
+			initializeGPU();
+		}
+		
 		if (dest == null) {
 			error2("Destination GPUMem is null!");
 		}
@@ -989,7 +1033,7 @@ public class GPUProgram {
 	 * @return bytes
 	 */
 	public static long getGlobalMemory() {
-		GPUProgram.initializeGPU();
+		initializeGPU();
 		
 		long[] value = {0};
 		CL.clGetDeviceInfo(device, CL.CL_DEVICE_GLOBAL_MEM_SIZE,
@@ -1001,7 +1045,7 @@ public class GPUProgram {
 	 * @return bytes
 	 */
 	public static long getMaxMemAllocSize() {
-		GPUProgram.initializeGPU();
+		initializeGPU();
 		
 		long[] value = {0};
 		CL.clGetDeviceInfo(device, CL.CL_DEVICE_MAX_MEM_ALLOC_SIZE,
@@ -1012,13 +1056,14 @@ public class GPUProgram {
 	/** Return the maximum size of a local work group
 	 */
 	public static int getMaxLocalWorkGroupSize() {
+		initializeGPU();
 		return (int)getDeviceInfoInt(device, CL.CL_DEVICE_MAX_WORK_GROUP_SIZE);
 	}
 	
 	/** Display metrics for the GPU.
 	 */
 	public static void printDeviceStatistics() {
-		GPUProgram.initializeGPU();
+		initializeGPU();
 		
 		print("Device Name: " + getDeviceInfoString(device, CL.CL_DEVICE_VENDOR) + " " + getDeviceInfoString(device, CL.CL_DEVICE_NAME));
 		print("Parallel Compute Units: " + getDeviceInfoInt(device, CL.CL_DEVICE_MAX_COMPUTE_UNITS));
