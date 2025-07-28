@@ -24,8 +24,8 @@ public class GPUMemoryTest {
 		
 		GPUProgram.initializeGPU();
 		
-		vecAddProgram = new GPUProgram("sum", "src/gpuTesting/MemoryTest.cl");
-		vecMultProgram = new GPUProgram("mult", "src/gpuTesting/MemoryTest.cl");
+		vecAddProgram = new GPUProgram("sum", "src/test/MemoryTest.cl");
+		vecMultProgram = new GPUProgram("mult", "src/test/MemoryTest.cl");
 		
 		final int N = 100000000;
 

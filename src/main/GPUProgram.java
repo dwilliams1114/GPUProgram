@@ -23,7 +23,7 @@ import org.jocl.cl_program;
  * @author Daniel Williams
  * 
  * Created on February 27, 2019
- * Last update on May 17, 2025
+ * Last update on July 27, 2025
  *
  * This class provides access to OpenCL based general purpose parallel computing using the GPU.
  * 
@@ -659,7 +659,7 @@ public class GPUProgram {
 		CL.clEnqueueFillBuffer(commandQueue, mem.mem, Pointer.to(new byte[] {0}), 1,
 					startIndex * typeSize, length * typeSize, 0, null, null);
 		//CL.clFlush(commandQueue);
-		//CL.clFinish(commandQueue); // TODO are these necessary?
+		//CL.clFinish(commandQueue); // TODO are these necessary? I don't think so.
 	}
 	
 	/** Reserve blank memory on the GPU, and return a GPUMem pointer to that memory.
@@ -707,7 +707,7 @@ public class GPUProgram {
 		if (fillWithZeros) {
 			CL.clEnqueueFillBuffer(commandQueue, mem, Pointer.to(new byte[] {0}), 1, 0, numElements * typeSize, 0, null, null);
 			//CL.clFlush(commandQueue);
-			//CL.clFinish(commandQueue); // TODO are these necessary?
+			//CL.clFinish(commandQueue); // TODO are these necessary? I don't think so.
 		}
 		
 		return new GPUMem(mem, arrayPointer, type, new GPURange(0, numElements), accessType);
@@ -841,11 +841,7 @@ public class GPUProgram {
 		
 		// If we don't have a GPURange, then create one
 		if (sourceRange == null) {
-			//if (existingMem != null) {
-			//	sourceRange = existingMem.arrayRange;
-			//} else {
-				sourceRange = new GPURange(0, originalArrayLength);
-			//}
+			sourceRange = new GPURange(0, originalArrayLength);
 		}
 		
 		// Check whether the memory is in range
@@ -871,9 +867,6 @@ public class GPUProgram {
 						dataPointer.withByteOffset(sourceRange.start * typeSize), 0, null, null);
 		copyToGPUCounter++;
 		
-		existingMem.arrayRange = sourceRange;
-		existingMem.pointer = dataPointer;
-		
 		return existingMem;
 	}
 	
@@ -886,46 +879,23 @@ public class GPUProgram {
 	
 	/** Copy from the GPU to the CPU.
 	 * @param source A GPUMem pointer to memory on the GPU to copy from.
-	 * @param destArray A Java array to copy the data into.
+	 * @param numElements Number of elements to copy from the GPU.
 	 */
-	public static void copyArrayToCPU(GPUMem source, Object destArray) {
+	public static void copyArrayToCPU(GPUMem source, int numElements) {
 		
-		if (!initialized) {
-			initializeGPU();
+		if (source.arrayRange.start + numElements > source.arrayRange.end) {
+			error2("Cannot copy " + numElements + " elements from GPU into array spanning range " + source.arrayRange);
 		}
 		
-		if (source == null) {
-			error2("Source GPUMem is null!");
-		}
-		
-		if (destArray == null) {
-			error2("Array to copy to must not be null.");
-		}
-		
-		long numElements = -1;
-		long typeSize = 0;
-		Pointer dataPointer = null;
-		if (destArray instanceof float[]) {
-			numElements = ((float[])destArray).length;
-			typeSize = Sizeof.cl_float;
-			dataPointer = Pointer.to((float[])destArray);
-		} else if (destArray instanceof byte[]) {
-			numElements = ((byte[])destArray).length;
-			typeSize = Sizeof.cl_uchar;
-			dataPointer = Pointer.to((byte[])destArray);
-		} else if (destArray instanceof int[]) {
-			numElements = ((int[])destArray).length;
-			typeSize = Sizeof.cl_int;
-			dataPointer = Pointer.to((int[])destArray);
-		} else {
-			error2("Unsupported array type.");
-		}
-		
-		copyArrayToCPU_helper(source, dataPointer, numElements, typeSize);
+		copyArrayToCPU_helper(source, source.pointer, numElements, source.type.getSize());
 	}
 	
 	// Local helper function for the above two
 	private static void copyArrayToCPU_helper(GPUMem source, Pointer dataPointer, final long numElements, final long typeSize) {
+		
+		if (!initialized) {
+			initializeGPU();
+		}
 		
 		if (source == null) {
 			error2("Source GPUMem is null.");
@@ -939,20 +909,60 @@ public class GPUProgram {
 			error2("Attempted to access deallocated GPUMem object.");
 		}
 		
-		// Size checks
-		if (source.arrayRange.size > numElements) {
-			error2("Cannot copy " + source.arrayRange.size +
-					" elements from GPU to array of length "+ numElements + ".");
-		}
-		if (source.arrayRange.end > numElements) {
-			error2("GPU array overruns end of CPU array: " + source.arrayRange +
-					" into [0," + numElements + ").");
+		// Make sure the size fits
+		if (numElements > source.maxAllocatedSize) {
+			error2("Can't copy " + numElements + " elements from GPUMem that only contains " + source.maxAllocatedSize + " elements.");
 		}
 		
 		// Copy data from the GPU to main memory
 		CL.clEnqueueReadBuffer(commandQueue, source.mem, true, 0,
 				typeSize * source.arrayRange.size,
 				dataPointer.withByteOffset(source.arrayRange.start * typeSize), 0, null, null);
+		copyToCPUCounter++;
+	}
+	
+	/** Copy from the GPU to the CPU.
+	 * @param source A GPUMem pointer to memory on the GPU to copy from.
+	 * @param destArray A Java array to copy the data into.
+	 */
+	public static void copyArrayToCPU(GPUMem source, Object destArray) {
+		
+		if (destArray == null) {
+			error2("Array to copy to must not be null.");
+		}
+		
+		long numElements = -1;
+		ArrayType type = null;
+		Pointer dataPointer = null;
+		if (destArray instanceof float[]) {
+			numElements = ((float[])destArray).length;
+			type = ArrayType.FLOAT;
+			dataPointer = Pointer.to((float[])destArray);
+		} else if (destArray instanceof byte[]) {
+			numElements = ((byte[])destArray).length;
+			type = ArrayType.BYTE;
+			dataPointer = Pointer.to((byte[])destArray);
+		} else if (destArray instanceof int[]) {
+			numElements = ((int[])destArray).length;
+			type = ArrayType.INT;
+			dataPointer = Pointer.to((int[])destArray);
+		} else {
+			error2("Unsupported array type.");
+		}
+		
+		// Verify the types match
+		if (type != source.type) {
+			error2("Can't copy type " + source.type + " into array of type " + type);
+		}
+		
+		// Make sure the size fits
+		if (numElements > source.maxAllocatedSize) {
+			error2("Can't copy " + numElements + " elements from GPUMem that only contains " + source.maxAllocatedSize + " elements.");
+		}
+		
+		// Copy data from the GPU to main memory
+		CL.clEnqueueReadBuffer(commandQueue, source.mem, true, 0, 0,
+				dataPointer, 0, null, null);
 		copyToCPUCounter++;
 	}
 	
